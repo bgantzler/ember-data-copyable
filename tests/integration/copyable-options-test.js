@@ -112,3 +112,19 @@ test('it handles relational deep copy overrides', async function(assert) {
     assert.equal(copy.get('bar.foo.id'), 1);
   });
 });
+
+test('it saves attrs in options', async function(assert) {
+  assert.expect(3);
+
+  let model = this.store.peekRecord('bar', 1);
+
+  let options = {};
+
+  await run(async () => {
+    await model.copy(true, options);
+
+    assert.ok(options.attrs);
+    assert.ok(options.dAttrs);
+    assert.ok(options.rAttrs);
+  });
+});

@@ -10,7 +10,8 @@ const {
   guidFor,
   isEmpty,
   runInDebug,
-  Copyable
+  Copyable,
+  setProperties
 } = Ember;
 
 const {
@@ -33,7 +34,13 @@ const DEFAULT_OPTIONS = {
   overwrite: {},
 
   // Relationship options
-  relationships: {}
+  relationships: {},
+
+  // Create models in the store, or use objectDefinition
+  createAsModel: true,
+
+  // Object to create if not a model
+  objectDefinition: null
 };
 
 export default Ember.Mixin.create({
@@ -110,8 +117,8 @@ export default Ember.Mixin.create({
    * @type {Task}
    * @private
    */
-  [COPY_TASK]: task(function *(deep, options, _meta) {
-    options = assign({}, DEFAULT_OPTIONS, this.get('copyableOptions'), options);
+  [COPY_TASK]: task(function *(deep, _options, _meta) {
+    let options = assign({}, DEFAULT_OPTIONS, this.get('copyableOptions'), _options);
 
     let { ignoreAttributes, otherAttributes, copyByReference, overwrite } = options;
     let { copies } = _meta;
@@ -119,7 +126,7 @@ export default Ember.Mixin.create({
     let store = this.get('store');
     let guid = guidFor(this);
     let relationships = [];
-    let attrs = {};
+    let dAttrs = {}, rAttrs = {};
 
     // Handle cyclic relationships: If the model has already been copied,
     // just return that model
@@ -127,7 +134,17 @@ export default Ember.Mixin.create({
       return copies[guid];
     }
 
-    let model = store.createRecord(modelName);
+    let model = null;
+    if (options.createAsModel) {
+      model = store.createRecord(modelName);
+    } else {
+      if (options.objectDefinition) {
+        model = options.objectDefinition.create({})
+      } else {
+        model = {};
+      }
+    }
+
     copies[guid] = model;
 
     // Copy all the attributes
@@ -135,7 +152,7 @@ export default Ember.Mixin.create({
       if (ignoreAttributes.includes(name)) {
         return;
       } else if (!isUndefined(overwrite[name])) {
-        attrs[name] = overwrite[name];
+        dAttrs[name] = overwrite[name];
       } else if (
           !isEmpty(type) &&
           !copyByReference.includes(name) &&
@@ -158,9 +175,9 @@ export default Ember.Mixin.create({
           value = transform.deserialize(value, attributeOptions);
         }
 
-        attrs[name] = value;
+        dAttrs[name] = value;
       } else {
-        attrs[name] = this.get(name);
+        dAttrs[name] = this.get(name);
       }
     });
 
@@ -176,7 +193,7 @@ export default Ember.Mixin.create({
       let { name, meta } = relationships[i];
 
       if (!isUndefined(overwrite[name])) {
-        attrs[name] = overwrite[name];
+        rAttrs[name] = overwrite[name];
         continue;
       }
 
@@ -197,7 +214,7 @@ export default Ember.Mixin.create({
             copyRef.belongsToRelationship.addRecords(ref.belongsToRelationship.members);
           }
         } catch (e) {
-          attrs[name] = this.get(name);
+          rAttrs[name] = this.get(name);
         }
 
         continue;
@@ -209,29 +226,34 @@ export default Ember.Mixin.create({
 
       if (meta.kind === 'belongsTo') {
         if (value && value.get(IS_COPYABLE)) {
-          attrs[name] = yield value.get(COPY_TASK).perform(deepRel, relOptions, _meta);
+          rAttrs[name] = yield value.get(COPY_TASK).perform(deepRel, relOptions, _meta);
         } else {
-          attrs[name] = value;
+          rAttrs[name] = value;
         }
       } else if (meta.kind === 'hasMany') {
         let firstObject = value.get('firstObject');
 
         if (firstObject && firstObject.get(IS_COPYABLE)) {
-          attrs[name] = yield all(
+          rAttrs[name] = yield all(
             value.getEach(COPY_TASK).invoke('perform', deepRel, relOptions, _meta)
           );
         } else {
-          attrs[name] = value;
+          rAttrs[name] = value;
         }
       }
     }
 
     // Build the final attrs pojo by merging otherAttributes, the copied
     // attributes, and ant overwrites specified.
-    attrs = assign(this.getProperties(otherAttributes), attrs, overwrite);
+    let attrs = assign(this.getProperties(otherAttributes), dAttrs, rAttrs, overwrite);
+    if (_options) {
+      _options.dAttrs = dAttrs;
+      _options.rAttrs = rAttrs;
+      _options.attrs = attrs;
+    }
 
     // Set the properties on the model
-    model.setProperties(attrs);
+    setProperties(model, attrs);
 
     return model;
   })

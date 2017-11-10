@@ -3,6 +3,7 @@ import { test } from 'ember-qunit';
 
 const {
   run,
+  get,
   RSVP: { allSettled }
 } = Ember;
 
@@ -236,4 +237,68 @@ export default function generateTests(options = { async: false }) {
       }
     });
   });
+
+  test('it creates javascript objects instead of models', async function(assert) {
+    assert.expect(2);
+
+    let model;
+
+    await run(async () => {
+      model = await getRecord(this, options, 'foo', 1);
+    });
+
+    await run(async () => {
+      let copy = await model.copy(false, { createAsModel: false });
+
+      assert.equal(get(model, 'property'), get(copy, 'property'));
+      assert.notEqual(get(copy, 'id'), 1);
+    });
+  });
+
+  test('it creates ember objects instead of models', async function(assert) {
+    assert.expect(3);
+
+    let model;
+
+    await run(async () => {
+      model = await getRecord(this, options, 'foo', 1);
+    });
+
+    await run(async () => {
+      let copy = await model.copy(false, { createAsModel: false, objectDefinition: Ember.Object });
+
+      assert.ok(copy.constructor.toString() === 'Ember.Object');
+      assert.equal(get(model, 'property'), get(copy, 'property'));
+      assert.notEqual(get(copy, 'id'), 1);
+    });
+  });
+
+  // TODO Cycles is now a regular array and not an ember array
+  test('it copies cyclical relationship as objects', async function(assert) {
+    assert.expect(6);
+
+    let model;
+
+    await run(async () => {
+      model = await getRecord(this, options, 'fooCycle', 1);
+    });
+
+    await run(async () => {
+      let copy = await model.copy(true, { createAsModel: false, objectDefinition: Ember.Object });
+
+      assert.equal(get(copy, 'property'), '1');
+      assert.equal(get(copy, 'fooCycle.property'), '1');
+      assert.notEqual(get(model, 'fooCycle.id'), get(copy, 'fooCycle.id'));
+      let cycles = get(copy, 'fooCycles');
+      assert.equal(get(cycles[0], 'property'), '1');
+      assert.equal(get(cycles[1], 'property'), '2');
+
+      if (options.async) {
+        assert.equal(cycles[0], await get(copy, 'fooCycle'));
+      } else {
+        assert.equal(cycles[0], get(copy, 'fooCycle'));
+      }
+    });
+  });
+
 }
